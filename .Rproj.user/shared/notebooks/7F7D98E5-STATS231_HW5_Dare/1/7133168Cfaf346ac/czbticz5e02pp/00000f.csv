@@ -1,0 +1,7 @@
+"0","pokemon_split <- initial_split(pokemon, prop = 0.7, strata = type_1)"
+"0","pokemon_train <- training(pokemon_split)"
+"0","pokemon_test <- testing(pokemon_split)"
+"0","# 5-fold cross validation"
+"0","pokemon_folds  <- vfold_cv(pokemon_train, v = 5, strata = type_1)"
+"0","# Verify that the training and testing sets have the correct number of observations"
+"0","data.frame(train = c(count(pokemon_train)), test = c( count(pokemon_test) )) %>% rename( Train = n, Test = n.1)"

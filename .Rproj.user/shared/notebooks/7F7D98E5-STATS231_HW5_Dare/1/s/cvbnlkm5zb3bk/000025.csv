@@ -1,0 +1,3 @@
+"0","random_forest_test_res %>% "
+"0","  conf_mat(truth = type_1, estimate = .pred_class) %>% "
+"0","  autoplot(type = ""heatmap"")"

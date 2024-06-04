@@ -1,0 +1,7 @@
+"0","############################"
+"0","# Use Linear Regression Fit to Predict Training Data"
+"0","############################"
+"0","linear_train_res_AMD  <- predict(linear_fit_AMD, new_data = AMD_train %>% select(-Close)) %>%"
+"0","                          bind_cols(AMD_train %>% select(Close))"
+"2","Error: object 'linear_fit_AMD' not found
+"

@@ -1,0 +1,471 @@
+---
+title: "Dare_HW5"
+author: "Chris Dare"
+date: "2024-05-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(ranger) # Random forests
+library(ggplot2)
+library(corrplot)
+library(ggthemes)
+library(kableExtra)
+library(vip)
+library(yardstick)
+library(themis)
+library(janitor)
+library(plotly) # Used in several of the rotating carousels for interactive plots
+tidymodels_prefer()
+conflicted::conflicts_prefer(yardstick::rsq)
+
+set.seed(3435)
+```
+
+### Exercise 1
+
+Install and load the `janitor` package. Use its `clean_names()` function on the Pokémon data, and save the results to work with for the rest of the assignment. What happened to the data? Why do you think `clean_names()` is useful?
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+pokemon <- read.csv("data/Pokemon.csv") %>% clean_names()
+pokemon %>% 
+  head(30) %>% 
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  scroll_box(width = "100%", height = "200px")
+```
+
+<br/>
+The `clean_names()` function renamed the column labels / names of the predictors by removing any uppercase letters and replacing the `.` delimiters with underscore characters to make it "snake_case" (the default setting of `clean_names()`). 
+<br/>
+------------
+### Exercise 2
+
+Using the entire data set, create a bar chart of the outcome variable, `type_1`.
+
+How many classes of the outcome are there? Are there any Pokémon types with very few Pokémon? If so, which ones?
+
+For this assignment, we'll handle the rarer classes by grouping them, or "lumping them," together into an 'other' category. [Using the `forcats` package](https://forcats.tidyverse.org/), determine how to do this, and **lump all the other levels together except for the top 6 most frequent** (which are Bug, Fire, Grass, Normal, Water, and Psychic).
+
+Convert `type_1` and `legendary` to factors.
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+p<- ggplot(pokemon, aes(x=type_1)) + geom_bar() +
+  labs(x="Primary Type") + theme_gray() + theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) 
+ggplotly(p)
+```
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+# Convert type_1 and legendary to factors
+pokemon <- pokemon %>%
+  mutate(type_1=factor(type_1)) %>%
+  mutate(legendary=factor(legendary)) %>%
+  mutate(generation=factor(generation))
+pokemon$type_1 <- fct_collapse(pokemon$type_1, Other=c("Steel", "Rock", "Poison", "Ice",
+                                                "Ground", "Ghost","Flying", "Fighting", 
+                                                "Fairy","Electric","Dragon","Dark")) 
+```
+
+<br/>
+There are initially 18 different primary types ofPokémon — the flying type and fairy type have significantly low numbers of Pokémon. While this makes sense for the fairy type (since it wasn't added until Generation VI) it's a bit odd that a primary type existing since Generation I has such a low count.
+<br/>
+--------------
+### Exercise 3
+
+Perform an initial split of the data. Stratify by the outcome variable. You can choose a proportion to use. Verify that your training and test sets have the desired number of observations.
+
+Next, use *v*-fold cross-validation on the training set. Use 5 folds. Stratify the folds by `type_1` as well. *Hint: Look for a `strata` argument.*
+
+Why do you think doing stratified sampling for cross-validation is useful?
+
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+set.seed(3435)
+
+pokemon_split <- initial_split(pokemon, prop = 0.7, strata = type_1)
+pokemon_train <- training(pokemon_split)
+pokemon_test <- testing(pokemon_split)
+# 5-fold cross validation
+pokemon_folds  <- vfold_cv(pokemon_train, v = 5, strata = type_1)
+# Verify that the training and testing sets have the correct number of observations
+data.frame(train = c(count(pokemon_train)), test = c( count(pokemon_test) )) %>% rename( Train = n, Test = n.1)
+```
+<br/>
+<br/>
+Stratified sampling in cross-validation ensures that each fold has _roughly_ the same distribution / proportion of classes in each fold. This ensures that models produced on each fold should scale well to the original dataset, and will likely better generalize to unseen data. 
+
+<br/>
+-----------
+### Exercise 4
+
+Create a correlation matrix of the training set, using the `corrplot` package. *Note: You can choose how to handle the categorical variables for this plot; justify your decision(s).*
+
+What relationships, if any, do you notice?
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+# Hot-One the legendary predictor
+pokemon_train$is_legendary <- as.numeric(pokemon_train$legendary) - 1
+pokemon_train %>%
+  select(where(is.numeric)) %>%
+  cor() %>%
+  corrplot(type = 'lower', diag = FALSE,
+           method = 'color')
+
+# Get rid of 'dummy' column for one-hot encoding since we only
+# use that for the corrplot in this assignment
+pokemon_train <- subset(pokemon_train, select=-is_legendary)
+```
+
+We are able to one-hot the legendary status of a Pokémon incredibly easily because there are only two categorical classes: True and False. Despite it being easy to include, it is also worthwhile keeping the legendary (actually a temporary `is_legendary` column containing the one-hot-encoded values) since it is a valid question of whether "legendary" Pokémon have better stats than their ordinary counterparts. 
+
+However, we choose not to include the `type_1` categorical variable since we are ultimately lumping 12 potentially very different classes into a new "Other" class, essentially diluting whatever possible correlation information those classes could have contributed. While we could have potentially included `type_2` (since the classes are not collapsed), it would be a bit difficult to one-hot encode 18 different classes in such a way that correlation information is readable for each individual class. 
+
+After looking at the results of the correlation matrix, we first address the expected relations. Possibly the most trivial is the perfect correlation between generation and `x` (which is the PokéDex entry number) — for those who have played the games, this is completely expected since new Pokémon introduced in each generation are added at the __end__ of where the PokéDex left off. Thus, generation II Pokémon's PokéDex entries begin after the last Generation I Pokémon. In addition, the relation between 'total' and each Pokémon stat is expected, since the total is simply the sum of the stats for each Pokémon. 
+
+Possibly the most surprising result is that there are no negative correlations between Pokémons' stats. As a competitive game / series, Pokémon must be kept an even playing field to ensure players are able to strategically enjoy the game. What this usually means is that Pokémon that specialize in attack (e.g. most Fire-type Pokémon) have lower defense of special defense stats — however, the correlation plot above does not indicate this in any way.
+
+### Exercise 5
+
+Set up a recipe to predict `type_1` with `legendary`, `generation`, `sp_atk`, `attack`, `speed`, `defense`, `hp`, and `sp_def`.
+
+-   Dummy-code `legendary` and `generation`;
+
+-   Center and scale all predictors.
+
+
+```{r eval = TRUE, results='hide', include=TRUE, warning=FALSE}
+pokemon_recipe <-
+  recipe(type_1 ~ legendary + generation + sp_atk + attack + speed + defense + hp + sp_def, data = pokemon_train) %>% 
+  step_dummy(legendary) %>%
+  step_dummy(generation) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors())
+
+prep(pokemon_recipe) %>% bake(new_data = pokemon_train)
+```
+
+
+### Exercise 6
+
+We'll be fitting and tuning an elastic net, tuning `penalty` and `mixture` (use `multinom_reg()` with the `glmnet` engine).
+
+Set up this model and workflow. Create a regular grid for `penalty` and `mixture` with 10 levels each; `mixture` should range from 0 to 1. For this assignment, let `penalty` range from 0.01 to 3 (this is on the `identity_trans()` scale; note that you'll need to specify these values in base 10 otherwise).
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+elastic_net_model <- multinom_reg(mixture = tune(),
+                              penalty = tune()) %>%
+  set_engine("glmnet")
+
+elastic_net_wflow <- workflow() %>%
+  add_model(elastic_net_model) %>%
+  add_recipe(pokemon_recipe)
+
+elastic_net_grid <- grid_regular(penalty(range=c(0.01, 3), trans = identity_trans()),
+                                 mixture(range(0,1)), 
+                                 levels = 10)
+```
+
+
+### Exercise 7
+
+Now set up a random forest model and workflow. Use the `ranger` engine and set `importance = "impurity"`; we'll be tuning `mtry`, `trees`, and `min_n`. Using the documentation for `rand_forest()`, explain in your own words what each of these hyperparameters represent.
+
+Create a regular grid with 8 levels each. You can choose plausible ranges for each hyperparameter. Note that `mtry` should not be smaller than 1 or larger than 8. **Explain why neither of those values would make sense.**
+
+What type of model does `mtry = 8` represent?
+
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+random_forest_model <- rand_forest(mtry = tune(), 
+                       trees = tune(), 
+                       min_n = tune()) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+random_forest_wflow <- workflow() %>% 
+  add_model(random_forest_model) %>%
+  add_recipe(pokemon_recipe) 
+
+random_forest_grid <- grid_regular(mtry(range = c(1, 8)),
+                        trees(range = c(200,700)),
+                        min_n(range = c(1,16)),
+                        levels = 8)
+```
+
+Recall that the random forest algorithm utilizes a collection of decision trees, each built upon bagging the training set. Since individual decision trees are sensitive to changes in the training data, taking the mean or mode of a large number of decision trees (trained on slightly different bootstrap aggregated data) removes this sensitivity. The `trees` hyperparameter is the easiest to describe in this case: __it is simply the number of decision trees that we wish to create in our model__, and thus the number of predictions that we will either take the mean or mode over to get our final result. The `mtry` and `min_n`, on the other hand, control more of the behavior of the individual decision trees. The `mtry` hyperparameter controls the number of predictors that are randomly chosen to be considered for each split in a _single_ tree. Similarly, `min_n` sets the minimum number of observations needed to split a node — since a large number of splits in the predictor space can lead to complex trees, small values of `mtry` with large values of `min_n` can lead to very complicated trees that can potentially overfit the data.
+
+Since our recipe specifies that the outcome variable `type_1` only depends on the 8 predictors `legendary`, `generation`, `sp_atk`, `attack`, `speed`, `defense`, `hp`, and `sp_def`, it does not make sense to set `mtry` larger than 8 since we cannot randomly sample more predictors than we have. Similarly, it doesn't make sense to randomly sample NO predictors, since it then is impossible to split the parameter space to make decision trees. 
+
+Lastly, a random forest model with `mtry=8` simply means every decision tree will be built off of splitting the entire predictor space (i.e. all predictors are considered when building our decision trees).
+
+### Exercise 8
+
+Fit all models to your folded data using `tune_grid()`.
+
+**Note: Tuning your random forest model will take a few minutes to run, anywhere from 5 minutes to 15 minutes and up. Consider running your models outside of the .Rmd, storing the results, and loading them in your .Rmd to minimize time to knit. We'll go over how to do this in lecture.**
+
+Use `autoplot()` on the results. What do you notice? Do larger or smaller values of `penalty` and `mixture` produce better ROC AUC? What about values of `min_n`, `trees`, and `mtry`?
+
+What elastic net model and what random forest model perform the best on your folded data? (What specific values of the hyperparameters resulted in the optimal ROC AUC?)
+
+
+```{r eval = FALSE, include=TRUE, warning=FALSE}
+elastic_net_tune  <- tune_grid(
+  elastic_net_wflow ,
+  resamples = pokemon_folds,
+  grid = elastic_net_grid
+)
+
+save(elastic_net_tune, file = "tuned_grids/elastic_net_tune.rda")
+
+random_forest_tune <- tune_grid( 
+  random_forest_wflow,
+  resamples = pokemon_folds,
+  grid = random_forest_grid
+)
+
+save(random_forest_tune, file = "tuned_grids/random_forest_tune.rda")
+```
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+load("tuned_grids/elastic_net_tune.rda")
+load("tuned_grids/random_forest_tune.rda")
+
+
+g1<-autoplot(elastic_net_tune) + ggtitle("Elastic Net") + theme_dark()
+ggplotly(g1)
+```
+
+<br/>
+<br/>
+<br/>
+<br/>
+From the above plot, we see that larger values of `mixture` tend to make our models more accurate when penalty is considerable small (in other words, when the `penalty` value is lowest at 0.01, Lasso tends to do better than Ridge). While the accuracy plot seems to indicate that all mixtures behave roughly the same when larger values of `penalty` are considered, the `roc_auc` performance plot indicates that pure Ridge regression performs much better than pure Lasso regression in this case. 
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+g2 <- autoplot(random_forest_tune)
+pp2 <- ggplot(g2$data, aes(x = value, y = mean, group = `# Trees`, color = `# Trees`)) +
+  geom_path() +
+  geom_point(size = 1) +
+  facet_grid(`.metric` ~ `Minimal Node Size`, scales = "free_y",  labeller = label_both) +
+  labs(x = paste(unique(g2$data$name)),
+       y = "") +
+  ggtitle("Random Forest") +
+  theme_dark() +
+  theme(text = element_text(size = 6)) 
+ggplotly(pp2)
+```
+
+For random forest, we notice that the `roc_auc` quickly improves with the number of randomly selected predictors (i.e. the `mtry` hyperparameter), but begins to taper off as more that $\geq 5$ randomly selected predictors are considered. There isnt much indication from the plots above that the minimal node size `min_n` or the number of trees `trees` has as much affect on the accuracy of the model — however, it is worth noting that the behavior of models with a larger number (e.g. the Pink Curve in the case of `trees = 700`) of trees seems to fluctuate much less than when the number of trees is smaller. 
+
+
+Ultimately, our best performing (in terms of `roc_auc`) elastic net model had `penalty = 0.01` and a mixture of `mixture=0.11111`, meaning that it was much closer to Ridge regression in terms of regularization. In addition, our best random forest model had 342 trees (i.e. `trees = 342`), randomly selected 3 predictors for each split (i.e. `mtry = 3`) and required a minimum of 5 observations to split a node in a decision tree (i.e. `min_n = 5`)
+
+### Exercise 9
+
+Select your optimal [**random forest model**]{.underline}in terms of `roc_auc`. Then fit that model to your training set and evaluate its performance on the testing set.
+
+Using the **training** set:
+
+-   Create a variable importance plot, using `vip()`. *Note that you'll still need to have set `importance = "impurity"` when fitting the model to your entire training set in order for this to work.*
+
+    -   What variables were most useful? Which were least useful? Are these results what you expected, or not?
+
+Using the testing set:
+
+-   Create plots of the different ROC curves, one per level of the outcome variable;
+
+-   Make a heat map of the confusion matrix.
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+random_forest_final_wflow <- select_best(random_forest_tune , metric="roc_auc" ) %>%
+  finalize_workflow(x=random_forest_wflow)
+
+random_forest_fit  <- fit(random_forest_final_wflow , pokemon_train)
+
+random_forest_fit %>% extract_fit_parsnip() %>% 
+  vip() 
+```
+
+From the above variable importance plot, we see that the base stats of a Pokémon are the most important factors in determining the primary type of a pokemon, while the least important factors were the generation and legendary status — in fact, the legendary status didnt even make it onto the top 10 most important variables. This is ultimately expected, since the distribution of Pokémon types added in each generation is expected to be _roughly_ the same. 
+
+<br/>
+<br/>
+<br/>
+<br/>
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+set.seed(3435)
+
+random_forest_test <- fit(random_forest_final_wflow, pokemon_test)
+random_forest_test_res <- augment(random_forest_test, new_data = pokemon_test)
+
+random_forest_test_res %>%
+  roc_curve(type_1 , c(.pred_Bug, .pred_Fire, .pred_Normal, .pred_Grass, .pred_Psychic, .pred_Water, .pred_Other) ) %>%
+  autoplot()
+```
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+random_forest_test_res %>% 
+  conf_mat(truth = type_1, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+
+
+
+### Exercise 10
+
+How did your best random forest model do on the testing set?
+
+Which Pokemon types is the model best at predicting, and which is it worst at? (Do you have any ideas why this might be?)
+
+----------------------
+
+Ultimately, the confusion matrix indicates that our best random forest model seems to perfectly predict the testing data (since the only nonzero entries are on the diagonal). However, the `roc_curve` plots seem to indicate that our model predicts the Grass and Bug types much better than the remaining five levels of our outcome — this may be due to the fact that the base statistics of grass and bug models have very identifiable characteristics, such as higher Speed. On the other hand, our model seemed to be worst at predicting the Normal and Other types — this makes sense for Other since we are combining a large number of classes into one outcome level, thus diluting any characteristics of the original classes. 
+
+## For 231 Students
+
+### Exercise 11
+
+In the 2020-2021 season, Stephen Curry, an NBA basketball player, made 337 out of 801 three point shot attempts (42.1%). Use bootstrap resampling on a sequence of 337 1's (makes) and 464 0's (misses). For each bootstrap sample, compute and save the sample mean (e.g. bootstrap FG% for the player). Use 1000 bootstrap samples to plot a histogram of those values. Compute the 99% bootstrap confidence interval for Stephen Curry's "true" end-of-season FG% using the quantile function in R. Print the endpoints of this interval.
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+# Double-Checks that randomness is fixed every time this is run
+set.seed(3435)
+
+# Create dataframe accurately representing that 337 of the shots were successful
+# Using the sample() function we can ensure this distribution is (somewhat) random
+curry_three <- data.frame(attempt = 1:801)
+curry_three$made_attempt <- numeric(nrow(curry_three))
+curry_three$made_attempt[sample(nrow(curry_three), 337)] <- 1
+
+# Double check that we indeed have 337 makes and 464 misses
+curry_three %>%
+  group_by(made_attempt) %>%
+  summarize(count=n())
+
+# Bootstrap our data
+curry_boots <- bootstraps(curry_three, times=1000)
+
+# create a function which extracts the boostrap sample
+# using the assessment() function, and then computes the mean
+# of the made_attempt predictor
+sample_mean_boots <- function(split){
+  return(mean(assessment(split)$made_attempt))
+}
+# Use mutate() + map() as explained in Lab 4
+boot_res <- curry_boots %>%
+  mutate(models = map(splits,sample_mean_boots)) %>%
+  unnest(models)
+
+# Plot histogram
+p<-ggplot(boot_res, aes(x=models))+
+  geom_histogram(color="darkblue", fill="lightblue", binwidth = 0.002) + labs(x="Sample Mean")
+ggplotly(p)
+
+# Print the 99% confidence interval for end of season FG%
+quantile(boot_res$models, probs = c(0.005, 0.995))
+```
+
+
+### Exercise 12
+
+Using the `abalone.txt` data from previous assignments, fit and tune a **random forest** model to predict `age`. Use stratified cross-validation and select ranges for `mtry`, `min_n`, and `trees`. Present your results. What was your final chosen model's **RMSE** on your testing set?
+
+```{r eval = TRUE, include=TRUE, warning=FALSE, results='hide'}
+abalone <- read.csv("data/abalone.csv")
+abalone <- transform(abalone, age=rings+1.5)
+
+
+abalone_split <- initial_split(abalone, prop = 0.7, strata = age)
+abalone_train <- training(abalone_split)
+abalone_test <- testing(abalone_split)
+
+abalone_folds  <- vfold_cv(abalone_train, v = 5, strata = age)
+
+abalone_recipe <- recipe(age ~ type + longest_shell + diameter +
+                           height + whole_weight + shucked_weight +
+                           viscera_weight + shell_weight,
+                         data = abalone_train) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(terms= ~ starts_with("type"):shucked_weight) %>%
+  step_interact(terms= ~ longest_shell:diameter) %>%
+  step_interact(terms= ~ shucked_weight:shell_weight) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) 
+
+prep(abalone_recipe) %>% 
+  bake(new_data = abalone_train) 
+
+random_forest_model_abalone <- rand_forest(mtry = tune(), 
+                       trees = tune(), 
+                       min_n = tune()) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("regression")
+
+random_forest_wflow_abalone <- workflow() %>% 
+  add_model(random_forest_model_abalone) %>%
+  add_recipe(abalone_recipe) 
+
+random_forest_grid_abalone <- grid_regular(mtry(range = c(1, 7)),
+                        trees(range = c(200,700)),
+                        min_n(range = c(1,16)),
+                        levels = 10)
+```
+<br/>
+Similar to Exercise 8 above, the results of our random forest grid take a significant amount of time to compute; thus, we store our results in an `.rda` file and save them for later steps.
+
+```{r eval = FALSE, include=TRUE, warning=FALSE}
+random_forest_tune_abalone <- tune_grid(
+  random_forest_wflow_abalone,
+  resamples = abalone_folds,
+  grid = random_forest_grid_abalone
+)
+
+save(random_forest_tune_abalone, file = "tuned_grids/random_forest_tune_abalone.rda")
+```
+Plotting the results of our grid search below, we notice that increasing the minimial node size `min_n` generally yields much better results in terms of both our RMSE and R^2 metrics. However, increasing the number of randomly selected predictors `mtry` past `mtry=3` seems to have little effect. 
+
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+load("tuned_grids/random_forest_tune_abalone.rda")
+
+g2 <- autoplot(random_forest_tune_abalone) +    theme(text = element_text(size = 3)) 
+pp2 <- ggplot(g2$data, aes(x = value, y = mean, group = `Minimal Node Size`, color = `Minimal Node Size`)) +
+  geom_path() +
+  geom_point(size = 1) +
+  facet_grid(`.metric` ~ `# Randomly Selected Predictors`, scales = "free_y",  labeller = label_both) +
+  labs(x = paste(unique(g2$data$name)),
+       y = "") +
+  ggtitle("Random Forest") +
+  theme_dark() +
+  theme(text = element_text(size = 4))
+ggplotly(pp2)
+```
+Ultimately, our best model (in terms of the RMSE) had 644 trees (i.e. `trees = 644`), randomly selected 6 predictors for each split (i.e. `mtry = 6`) and required a minimum of 16 observations to split a node in a decision tree (i.e. `min_n = 16`). One way to interpret this is that a forest made up of a large number of simpler trees performed better (on this particular regression problem) than a small number of much more complex trees.
+```{r eval = TRUE, include=TRUE, warning=FALSE}
+random_forest_final_wflow_abalone <- select_best(random_forest_tune_abalone , metric="rmse" ) %>%
+  finalize_workflow(x=random_forest_wflow_abalone)
+
+
+random_forest_fit_train_abalone  <- fit(random_forest_final_wflow_abalone , abalone_train)
+
+abalone_training_results <- predict(random_forest_fit_train_abalone, new_data = abalone_train %>% select(-age)) %>%
+                          bind_cols(abalone_train %>% select(age))
+
+random_forest_fit_test_abalone  <- fit(random_forest_final_wflow_abalone , abalone_test)
+
+abalone_testing_results <- predict(random_forest_fit_test_abalone, new_data = abalone_test %>% select(-age)) %>%
+                          bind_cols(abalone_test %>% select(age))
+
+tibble(dataset=c("RMSE", "R^2"),
+       training=c((abalone_training_results  %>% rmse( age, .pred))$.estimate,
+              (abalone_training_results  %>% rsq( age, .pred))$.estimate),
+       testing = c((abalone_testing_results  %>% rmse( age, .pred))$.estimate, 
+               (abalone_testing_results  %>% rsq( age, .pred))$.estimate)
+)
+```
+
+Ultimately, our final model performed quite well on the testing set with a testing RMSE of 1.36 (roughly a 3% increase from the training RMSE). 

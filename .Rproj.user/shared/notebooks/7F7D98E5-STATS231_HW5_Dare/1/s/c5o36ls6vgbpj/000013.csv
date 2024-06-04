@@ -1,0 +1,7 @@
+"0","random_forest_final_wflow <- select_best(random_forest_tune , metric=""roc_auc"" ) %>%"
+"0","  finalize_workflow(x=random_forest_wflow)"
+"0",""
+"0","random_forest_fit  <- fit(random_forest_final_wflow , pokemon_train)"
+"0",""
+"0","random_forest_fit %>% extract_fit_parsnip() %>% "
+"0","  vip() "

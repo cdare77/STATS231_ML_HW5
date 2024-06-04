@@ -1,0 +1,2 @@
+"0",""
+"0","pokemon_train <- subset(pokemon_train, select=-is_legendary)"

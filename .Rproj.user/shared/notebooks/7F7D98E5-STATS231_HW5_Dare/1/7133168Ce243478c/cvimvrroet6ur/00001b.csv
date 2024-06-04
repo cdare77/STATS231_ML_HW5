@@ -1,0 +1,4 @@
+"0",""
+"0","# Get rid of 'dummy' column for one-hot encoding since we only"
+"0","# use that for the corrplot in this assignment"
+"0","pokemon_train <- subset(pokemon_train, select=-is_legendary)"

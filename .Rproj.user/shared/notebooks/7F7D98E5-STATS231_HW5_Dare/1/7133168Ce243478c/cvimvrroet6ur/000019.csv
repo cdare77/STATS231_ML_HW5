@@ -1,0 +1,7 @@
+"0","# Hot-One the legendary predictor"
+"0","pokemon_train$is_legendary <- as.numeric(pokemon_train$legendary) - 1"
+"0","pokemon_train %>%"
+"0","  select(where(is.numeric)) %>%"
+"0","  cor() %>%"
+"0","  corrplot(type = 'lower', diag = FALSE,"
+"0","           method = 'color')"

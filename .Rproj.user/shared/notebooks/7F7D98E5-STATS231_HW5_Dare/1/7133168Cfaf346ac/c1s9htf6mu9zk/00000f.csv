@@ -1,0 +1,6 @@
+"0","pokemon <- read.csv(""data/Pokemon.csv"") %>% clean_names()"
+"0","pokemon %>% "
+"0","  head(30) %>% "
+"0","  kable() %>% "
+"0","  kable_styling(full_width = F) %>% "
+"0","  scroll_box(width = ""100%"", height = ""200px"")"

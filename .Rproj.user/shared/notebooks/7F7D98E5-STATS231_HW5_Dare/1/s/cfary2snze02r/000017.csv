@@ -1,0 +1,8 @@
+"0","set.seed(3435)"
+"0",""
+"0","random_forest_test <- fit(random_forest_final_wflow, pokemon_test)"
+"0","random_forest_test_res <- augment(random_forest_test, new_data = pokemon_test)"
+"0",""
+"0","random_forest_test_res %>%"
+"0","  roc_curve(type_1 , c(.pred_Bug, .pred_Fire, .pred_Normal, .pred_Grass, .pred_Psychic, .pred_Water, .pred_Other) ) %>%"
+"0","  autoplot()"

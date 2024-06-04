@@ -1,0 +1,3 @@
+"0","pokemon <- read.csv(""data/Pokemon.csv"") %>% clean_names()"
+"2","Error in file(file, ""rt"") : cannot open the connection
+"

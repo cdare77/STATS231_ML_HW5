@@ -1,0 +1,8 @@
+"0",""
+"0",""
+"0","pokemon <- pokemon %>%"
+"0","  mutate(type_1=factor(type_1)) %>%"
+"0","  mutate(legendary=factor(legendary))"
+"0","pokemon$type_1 <- fct_collapse(pokemon$type_1, Other=c(""Steel"", ""Rock"", ""Poison"", ""Ice"","
+"0","                                                ""Ground"", ""Ghost"",""Flying"", ""Fighting"", "
+"0","                                                ""Fairy"",""Electric"",""Dragon"",""Dark""))"

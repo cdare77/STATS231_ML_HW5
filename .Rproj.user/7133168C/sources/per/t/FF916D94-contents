@@ -1,0 +1,305 @@
+---
+title: "STATS231_Dare_HW3"
+author: Chris Dare
+output: html_document
+date: "2024-05-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(corrplot)
+library(discrim)
+library(ggthemes)
+library(kableExtra)
+library(yardstick)
+tidymodels_prefer()
+conflicted::conflicts_prefer(yardstick::rsq)
+
+set.seed(3435)
+```
+
+
+```{r eval = TRUE}
+titan <- read.csv("titanic.csv")
+titan <- titan %>% mutate(pclass=factor(pclass))
+titan <- titan %>% mutate(survived=factor(survived))
+```
+
+## Question 1 
+
+Split the data, stratifying on the outcome variable, survived. You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations. Take a look at the training data and note any potential issues, such as missing data.
+
+Why is it a good idea to use stratified sampling for this data?
+
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+titan_split <- initial_split(titan, prop = 3/4,
+                                strata = survived)
+titan_train <- training(titan_split)
+titan_test <- testing(titan_split)
+```
+
+*It's a good idea to use stratified sampling for this classification problem since otherwise our model may overfit the data (if we use the entire dataset as training).   *
+
+## Question 2
+
+Using the training data set, explore/describe the distribution of the outcome variable survived.
+
+Create a percent stacked bar chart (recommend using ggplot) with survived on the x-axis and fill = sex. Do you think sex will be a good predictor of the outcome?
+
+Create one more percent stacked bar chart of survived, this time with fill = pclass. Do you think passenger class will be a good predictor of the outcome?
+
+Why do you think it might be more useful to use a percent stacked bar chart as opposed to a traditional stacked bar chart?
+
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+ggplot(titan_train, aes(fill=sex, x=survived)) + 
+    geom_bar(position="fill", stat="count")
+
+ggplot(titan_train, aes(fill=pclass, x=survived)) + 
+    geom_bar(position="fill", stat="count")
+```
+
+*Ultimately sex seems to be a better indicator of survival since the passenger class has a somewhat even split between those in passenger class 2 who survived and who did not survive. However, only a small proportion of those who did not survive were female. *
+
+*A percentage stacked bar chart is more useful here since it normalizes the data across categories, allowing us to see the relative proportions of who did and did not survive instead of allowing one class to dominate the chart.*
+
+## Question 3
+
+Using the training data set, create a correlation matrix of all continuous variables. Visualize the matrix and describe any patterns you see. Are any predictors correlated with each other? Which ones, and in which direction?
+
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+titan_train %>% 
+  select(where(is.numeric)) %>% 
+  cor() %>% 
+  corrplot(type = 'lower', diag = FALSE, 
+           method = 'color')
+```
+
+
+*Yes, parch and sib_sp were correlated — this makes sense as someone travelling with family such as children is quite likely to bring their spouse along. *
+
+
+## Question 4
+
+Using the training data, create a recipe predicting the outcome variable survived. Include the following predictors: ticket class, sex, age, number of siblings or spouses aboard, number of parents or children aboard, and passenger fare.
+
+Recall that there were missing values for age. To deal with this, add an imputation step using step_impute_linear(). Next, use step_dummy() to dummy encode categorical predictors. Finally, include interactions between:
+
+- Sex and passenger fare, and
+- Age and passenger fare.
+
+You’ll need to investigate the tidymodels documentation to find the appropriate step functions to use.
+
+---
+
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+titan_recipe <-
+  recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, data = titan_train) %>% 
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(terms= ~ starts_with("sex"):fare) %>%
+  step_interact(terms= ~ age:fare) 
+
+prep(titan_recipe) %>% 
+  bake(new_data = titan_train) %>% 
+  head() %>% 
+  kable() %>% 
+  kable_styling(full_width = F) %>% 
+  scroll_box(width = "100%", height = "200px")
+```
+
+
+## Question 5
+
+Specify a logistic regression model for classification using the "glm" engine. Then create a workflow. Add your model and the appropriate recipe. Finally, use fit() to apply your workflow to the training data.
+
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+log_reg <- logistic_reg() %>% 
+  set_engine("glm") %>% 
+  set_mode("classification")
+
+log_wflow <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titan_recipe)
+
+log_fit <- fit(log_wflow, titan_train)
+```
+
+## Question 6
+
+Repeat Question 5, but this time specify a linear discriminant analysis model for classification using the "MASS" engine.
+
+---
+
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titan_recipe)
+
+lda_fit <- fit(lda_wflow, titan_train)
+```
+
+## Question 7
+
+Repeat Question 5, but this time specify a quadratic discriminant analysis model for classification using the "MASS" engine.
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+qda_mod <- discrim_quad() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+qda_wflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(titan_recipe)
+
+qda_fit <- fit(qda_wflow, titan_train)
+```
+
+## Question 8
+
+Repeat Question 5, but this time specify a k-nearest neighbors model for classification using the "kknn" engine. Choose a value for k to try.
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+knn_model <- nearest_neighbor(neighbors = 5) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_wflow <- workflow() %>% 
+  add_model(knn_model) %>% 
+  add_recipe(titan_recipe)
+
+knn_fit <- fit(knn_wflow, titan_train)
+```
+
+## Question 9
+
+Now you’ve fit four different models to your training data.
+
+Use predict() and bind_cols() to generate predictions using each of these 4 models and your training data. Then use the metric of area under the ROC curve to assess the performance of each of the four models.
+
+---
+
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+log_reg_train_res <- predict(log_fit, type = "prob", new_data = titan_train %>% select(-survived))
+log_reg_train_res <- bind_cols(log_reg_train_res, titan_train %>% select(survived))
+log_reg_train_res %>% roc_auc(survived, .pred_No)
+```
+
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+lda_reg_train_res <- predict(lda_fit, type = "prob", new_data = titan_train %>% select(-survived))
+lda_reg_train_res <- bind_cols(lda_reg_train_res, titan_train %>% select(survived))
+lda_reg_train_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+qda_reg_train_res <- predict(qda_fit, type="prob", new_data = titan_train %>% select(-survived))
+qda_reg_train_res <- bind_cols(qda_reg_train_res, titan_train %>% select(survived))
+qda_reg_train_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+knn_reg_train_res <- predict(knn_fit, type="prob", new_data = titan_train %>% select(-survived))
+knn_reg_train_res <- bind_cols(knn_reg_train_res, titan_train %>% select(survived))
+knn_reg_train_res %>% roc_auc(survived, .pred_No)
+```
+
+## Question 10 
+
+Fit all four models to your testing data and report the AUC of each model on the testing data. Which model achieved the highest AUC on the testing data?
+
+Using your top-performing model, create a confusion matrix and visualize it. Create a plot of its ROC curve.
+
+How did your best model perform? Compare its training and testing AUC values. If the values differ, why do you think this is so?
+
+---
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+log_reg_test_res <- predict(log_fit, type="prob", new_data = titan_test %>% select(-survived))
+log_reg_test_res <- bind_cols(log_reg_test_res, titan_test %>% select(survived))
+log_reg_test_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+lda_reg_test_res <- predict(lda_fit, type="prob", new_data = titan_test %>% select(-survived))
+lda_reg_test_res <- bind_cols(lda_reg_test_res, titan_test %>% select(survived))
+lda_reg_test_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+qda_reg_test_res <- predict(qda_fit, type="prob", new_data = titan_test %>% select(-survived))
+qda_reg_test_res <- bind_cols(qda_reg_test_res, titan_test %>% select(survived))
+qda_reg_test_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+knn_reg_test_res <- predict(knn_fit, type="prob", new_data = titan_test %>% select(-survived))
+knn_reg_test_res <- bind_cols(knn_reg_test_res, titan_test %>% select(survived))
+knn_reg_test_res %>% roc_auc(survived, .pred_No)
+```
+
+```{r eval = TRUE, include=TRUE, warnings=FALSE}
+log_model_test_res = augment(log_fit, titan_test)
+
+log_model_test_res %>%
+  conf_mat(truth = survived, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+log_model_test_res %>%
+  roc_curve(survived, .pred_No) %>%
+  autoplot()
+```
+
+## Question 11
+
+Given that $$p(z) = \frac{e^z}{1 + e^z}$$ prove that the inverse of a logistic function is indeed the _logit_ function $$z(p) = \operatorname{ln} \left( \frac{p}{1-p} \right) $$
+
+---
+
+---
+
+To see this, we may first write $p(z)$ as $$p(z) = \frac{1 + e^z - 1}{1+ e^z} = 1 - \frac{1}{1 + e^z}$$ Then $\frac{1}{1- p(z)} = 1 + e^z$ so that $$ e^z = \frac{1}{1-p} - \frac{1-p}{1-p} = \frac{p}{1-p}$$ The result follows from taking the natural logarithm of both sides.
+
+
+
+
+## Question 12
+
+Assume that $z = \beta_0 + \beta_1 x_1$ and $p(z) = \operatorname{logistic}(z)$.  How do the odds of the outcome change if you increase $x_1$ by two? Demonstrate this.
+
+Assume now that $\beta_1$ is negative. What value does $p$ approach as $x_1$ approaches $\infty$? What value does $p$ approach as $x_1$ approaches $\infty$? Demonstrate.
+
+---
+
+Recall that given a differentiable function $f : \mathbb{R} \to \mathbb{R}$, one can always _locally_ approximate $f$ at $x=x_0$ via $\Delta f \approx \frac{df}{dx}\vert_{x=x_0}\, \Delta x$. An immediate application of the chain rule then gives us
+$$
+\Delta p \approx \frac{p(z)}{1 + e^z} \cdot \beta_1 \cdot \Delta x_1
+$$
+In particular, the amount the outcome changes when the $x_1$ is increased by 2 depends on the original value of $x_1$ — however this is a slightly obvious statement since the function is non-linear. 
+
+When $\beta_1 < 0$, $\lim_{x_1 \to \infty} p(z) = \lim_{z \to -\infty} p(z) = 0$. Similarly, $\lim_{x_1 \to -\infty} p(z) = \lim_{z \to \infty} p(z) = 1$.
